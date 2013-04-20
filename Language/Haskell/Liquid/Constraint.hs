@@ -362,7 +362,7 @@ splitC (SubC γ (RAllT α1 t1) (RAllT α2 t2))
   = splitC $ SubC γ t1 t2' 
   where t2' = subsTyVar_meet' (α2, RVar α1 F.top) t2
 
-splitC (SubC γ t1@(RApp _ _ _ _) t2@(RApp _ _ _ _))
+splitC (SubC γ t1@(RApp c1 _ _ _) t2@(RApp c2 _ _ _)) | c1 == c2
   = do (t1',t2') <- unifyVV t1 t2
        let cs    = bsplitC γ t1' t2'
        γ'    <- γ `extendEnvWithVV` t1' 
@@ -382,8 +382,9 @@ splitC (SubC γ t1@(RVar a1 _) t2@(RVar a2 _))
 splitC (SubC _ (RCls c1 _) (RCls c2 _)) | c1 == c2
   = return []
 
-splitC c@(SubC _ t1 t2) 
-  = errorstar $ "(Another Broken Test!!!) splitc unexpected: " ++ showpp t1 ++ "\n\n" ++ showpp t2
+splitC c@(SubC γ t1 t2) 
+  = errorstar $ "(Another Broken Test!!!) splitc unexpected from"
+       ++ showpp (tgKey γ) ++ "\n"++ showpp t1 ++ "\n\n" ++ showpp t2
 
 splitCIndexed γ t1s t2s indexes 
   = concatMapM splitC (zipWith (SubC γ) t1s' t2s')

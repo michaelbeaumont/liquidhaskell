@@ -1,13 +1,21 @@
-module ListSort where
+{-# LANGUAGE ExistentialQuantification, FlexibleInstances, GeneralizedNewtypeDeriving,
+             MultiParamTypeClasses, TypeSynonymInstances, CPP, DeriveDataTypeable #-}
 
 
-data P a = P a Int
 
-{-@ data P a <p :: a -> Int -> Prop>
-     = P (i :: a) (v :: Int<p i>)
-  @-}
-{-@ type OP  = P <{\p v ->  p > v}> Int @-}
+module Xmonad where
 
-foo :: P Int
-{-@ foo :: OP @-}
-foo = P 3 2
+import Control.Monad.State
+import Control.Monad.Reader
+
+data XConf
+data XState
+
+newtype X a = X (ReaderT XConf (StateT XState IO) a)
+    deriving (Monad, MonadIO, MonadState XState, MonadReader XConf)
+
+runX :: XConf -> XState -> X a -> IO (a, XState)
+runX c st (X a) = runStateT (runReaderT a c) st
+
+
+
