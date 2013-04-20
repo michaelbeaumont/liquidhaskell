@@ -56,6 +56,7 @@ import Data.Monoid
 
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Set
 
 -- | XState, the (mutable) window manager state.
 data XState = XState
