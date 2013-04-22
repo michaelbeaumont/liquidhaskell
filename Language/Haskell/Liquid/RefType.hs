@@ -48,7 +48,7 @@ import DataCon
 import PrelInfo         (isNumericClass)
 import qualified TyCon  as TC
 import TypeRep          hiding (maybeParen, pprArrowChain)  
-import Type             (splitFunTys, expandTypeSynonyms)
+import Type             (splitFunTys, expandTypeSynonyms, coreView)
 import Type             (isPredTy, substTyWith, classifyPredType, PredTree(..), predTreePredType)
 import TysWiredIn       (listTyCon, intDataCon, trueDataCon, falseDataCon)
 
@@ -665,7 +665,8 @@ subvPredicate f (Pr pvs) = Pr (f <$> pvs)
 
 
 -- ofType ::  Reftable r => Type -> RRType r
-ofType = ofType_ . expandTypeSynonyms 
+ofType = ofType_ . coreView' . expandTypeSynonyms 
+  where coreView' t = fromMaybe t (coreView t)
 
 ofType_ (TyVarTy α)     
   = rVar α
