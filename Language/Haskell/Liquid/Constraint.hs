@@ -58,6 +58,7 @@ import Language.Haskell.Liquid.GhcInterface
 import Language.Haskell.Liquid.RefType
 import Language.Haskell.Liquid.PredType         hiding (freeTyVars)          
 import Language.Haskell.Liquid.Predicates
+import Language.Haskell.Liquid.Misc             (maybeIndex)
 import Language.Haskell.Liquid.GhcMisc          (getSourcePos, pprDoc, tickSrcSpan, hasBaseTypeVar, showPpr)
 import Language.Fixpoint.Misc
 import Language.Haskell.Liquid.Qualifier        
@@ -382,20 +383,31 @@ splitC (SubC γ t1@(RVar a1 _) t2@(RVar a2 _))
 splitC (SubC _ (RCls c1 _) (RCls c2 _)) | c1 == c2
   = return []
 
+splitC (SubC γ t1 (RApp c2 ts _ _)) | TC.isNewTyCon $ rTyCon c2
+  = do t2 <- liftM (subsTyVars_meet' vts) (trueTy t)
+       splitC $ SubC γ t1 t2
+   where (vs, t) = TC.newTyConRhs $ rTyCon c2  
+         vts     = zip (rTyVar <$> vs) ts
+
+splitC (SubC γ (RApp c1 ts rs r) t2) | TC.isNewTyCon $ rTyCon c1
+  = do t1 <- liftM (subsTyVars_meet' vts) (trueTy t)
+       splitC $ SubC γ t1 t2 
+   where (vs, t) = TC.newTyConRhs $ rTyCon c1
+         vts     = zip (rTyVar <$> vs) ts
+ 
 splitC c@(SubC γ t1 t2) 
   = errorstar $ "(Another Broken Test!!!) splitc unexpected from"
        ++ showpp (tgKey γ) ++ "\n"++ showpp t1 ++ "\n\n" ++ showpp t2
 
 splitCIndexed γ t1s t2s indexes 
   = concatMapM splitC (zipWith (SubC γ) t1s' t2s')
-  where t1s' = (L.!!) t1s <$> indexes
-        t2s' = (L.!!) t2s <$> indexes
+  where t1s' = catMaybes $ maybeIndex t1s <$> indexes
+        t2s' = catMaybes $ maybeIndex t2s <$> indexes
 
 rsplitCIndexed γ t1s t2s indexes 
   = concatMapM (rsplitC γ) (safeZip "rsplitC" t1s' t2s')
-  where t1s' = (L.!!) t1s <$> indexes
-        t2s' = (L.!!) t2s <$> indexes
-
+  where t1s' = catMaybes $ maybeIndex t1s <$> indexes
+        t2s' = catMaybes $ maybeIndex t2s <$> indexes
 
 bsplitC γ t1 t2
   | F.isFunctionSortedReft r1' && F.isNonTrivialSortedReft r2'
@@ -645,7 +657,10 @@ addA _ _ _ !a
 -- is /obviously/ enforced.
 
 freshTy   :: CoreExpr -> Type -> CG SpecType 
-freshTy _ = liftM uRType . refresh . ofType 
+freshTy _ = freshTy' -- liftM uRType . refresh . ofType 
+
+freshTy' :: Type -> CG SpecType 
+freshTy' = liftM uRType . refresh . ofType 
 
 
 -- To revert to the old setup, just do
@@ -1047,6 +1062,7 @@ varRefType γ x =  t
 
 -- TODO: should only expose/use subt. Not subsTyVar_meet
 subsTyVar_meet' (α, t) = subsTyVar_meet (α, toRSort t, t)
+subsTyVars_meet' αts = subsTyVars_meet [(α, toRSort t, t) | (α, t) <- αts]
 
 -----------------------------------------------------------------------
 --------------- Forcing Strictness ------------------------------------
