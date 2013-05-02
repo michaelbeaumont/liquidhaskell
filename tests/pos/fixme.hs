@@ -1,13 +1,30 @@
-module ListSort where
+
+{-# LANGUAGE NoMonomorphismRestriction #-}
+
+module Fun where
+
+import Language.Haskell.Liquid.Prelude
 
 
-data P a = P a Int
+data F a = F a a
 
-{-@ data P a <p :: a -> Int -> Prop>
-     = P (i :: a) (v :: Int<p i>)
+{-@ data F a = F {ii :: a, jj :: {v:a|v>=ii}} @-}
+
+{-@ measure getI :: F a -> a
+    getI (F i j) = i
   @-}
-{-@ type OP  = P <{\p v ->  p > v}> Int @-}
 
-foo :: P Int
-{-@ foo :: OP @-}
-foo = P 3 2
+{-@ measure getJ :: F a -> a
+    getI (F i j) = j
+  @-}
+
+{-@ invariant {v:F a | (getI v) = (getJ v)}@-}
+{-@ modify :: (F a -> F a) -> F a -> F a @-}
+modify :: (F a -> F a) -> F a -> F a
+modify = undefined
+
+{-@ foo :: Eq a => F a -> F a @-}
+foo :: Eq a => F a -> F a
+foo = modify $ \c -> case c of {F i j -> liquidAssert (i == j) (F i j)}
+
+
