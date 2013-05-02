@@ -1,0 +1,13 @@
+****************************** WARNING: benchmarks/xmonad-0.11/XMonad/StackSet.hs:556:82 *****************************
+
+****************************** WARNING: <no location info> *****************************
+
+****************************** WARNING: <no location info> *****************************
+
+
+main edits:
+  delete Read instance
+  rewrite else branch of insertUp -- inlining
+TODO : 
+1. choose type for ++ 
+2. invariants or type arguments eg \c {-@ :: UStack a@-}-> 
