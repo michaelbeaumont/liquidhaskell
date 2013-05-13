@@ -376,11 +376,6 @@ abort x = error $ "xmonad: StackSet: " ++ x
 --LIQUID screens s = current s : visible s
 --LIQUID 
 --LIQUID -- | Get a list of all workspaces in the 'StackSet'.
---LIQUID workspaces :: StackSet i l a s sd -> [Workspace i l a]
---LIQUID workspaces s = workspace (current s) : map workspace (visible s) ++ hidden s
---LIQUID   where [] ++ ys     = ys              -- LIQUID
---LIQUID         (x:xs) ++ ys = x: (xs ++ ys)   -- LIQUID
---LIQUID 
 --LIQUID 
 --LIQUID -- | Get a list of all windows in the 'StackSet' in no particular order
 --LIQUID allWindows :: Eq a => StackSet i l a s sd -> [a]
@@ -442,6 +437,55 @@ abort x = error $ "xmonad: StackSet: " ++ x
 --LIQUID           has x (Just (Stack t l r)) = x `elem` (t : l ++ r)
 --LIQUID
 
+{-@ findTag' :: Eq a 
+             => x:a 
+             -> w:(Workspace i l a)
+             -> {v:Bool|((Prop v) <=> (WorkspaceElt x w)) }
+  @-}
+findTag' :: Eq a => a -> Workspace i l a -> Bool
+findTag' x w = has x (stack w)
+
+
+{- findTag'' :: Eq a 
+              => x:a 
+              -> st:(StackSet i l a s sd)
+              -> [Workspace i l a]
+  @-}
+--               -> [{vv:Workspace i l a| (WorkspaceElt x vv)}]
+
+findTag'' :: Eq a => a -> StackSet i l a s sd -> [Workspace i l a]
+findTag'' a s = go wps []
+   where wps = workspaces s
+         go [] ack     = ack
+         go (x:xs) ack | findTag' a x = go xs (x:ack)
+                       | otherwise    = go xs ack
+
+
+
+
+
+
+
+
+
+{-@ measure getWorkspaces :: (StackSet i l a sid sd) -> (Data.Set.Set (Workspace i l a))
+    getWorkspaces(StackSet c v h f) = {v | v = (Set_cup (listElts v) (Set_cup (listElts h) (getScreenWorkspaces c)))}
+  @-}
+
+{-@ measure getScreenWorkspaces :: (Screen i l a sid sd) -> (Data.Set.Set (Workspace i l a))
+    getScreenWorkspaces(Screen w s sd) = {v | v = (Set_sng w)}
+  @-}
+
+
+{-@ workspaces :: st:(StackSet i l a s sd) 
+               -> {v:[Workspace i l a] | (listElts v) = (getWorkspaces st)} @-}
+workspaces :: StackSet i l a s sd -> [Workspace i l a]
+workspaces s = undefined
+-- workspaces s = workspace (current s) : map workspace (visible s) ++ hidden s
+  where [] ++ ys     = ys              -- LIQUID
+        (x:xs) ++ ys = x: (xs ++ ys)   -- LIQUID
+
+
 -- if the window is not in the 'StackSet'.
 -- findTag :: Eq a => a -> StackSet i l a s sd -> Maybe i
 -- findTag a s = listToMaybe
@@ -451,14 +495,6 @@ abort x = error $ "xmonad: StackSet: " ++ x
   ((isJust (getStackWorkspace W)) && (StackElt N (fromJust (getStackWorkspace W)))) @-}
 
 
-
-{-@ findTag' :: Eq a 
-             => x:a 
-             -> w:(Workspace i l a)
-             -> {v:Bool|((Prop v) <=> (WorkspaceElt x w)) }
-  @-}
-findTag' :: Eq a => a -> Workspace i l a -> Bool
-findTag' x w = has x (stack w)
 
 
 {-@ stack :: w:(Workspace i l a) 
