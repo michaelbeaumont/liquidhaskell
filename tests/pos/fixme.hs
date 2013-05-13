@@ -446,19 +446,20 @@ findTag' :: Eq a => a -> Workspace i l a -> Bool
 findTag' x w = has x (stack w)
 
 
-{- findTag'' :: Eq a 
+{-@ findTag'' :: Eq a 
               => x:a 
               -> st:(StackSet i l a s sd)
-              -> [Workspace i l a]
+              -> {v:[{vv:Workspace i l a | (WorkspaceElt x vv)}] | (Set_sub (listElts v) (getWorkspaces st)) }
   @-}
---               -> [{vv:Workspace i l a| (WorkspaceElt x vv)}]
 
 findTag'' :: Eq a => a -> StackSet i l a s sd -> [Workspace i l a]
-findTag'' a s = go wps []
+findTag'' a s = go s a wps []
    where wps = workspaces s
-         go [] ack     = ack
-         go (x:xs) ack | findTag' a x = go xs (x:ack)
-                       | otherwise    = go xs ack
+
+go :: Eq a => StackSet i l a s sd -> a -> [Workspace i l a] -> [Workspace i l a] -> [Workspace i l a]
+go s a [] ack     = ack
+go s a (x:xs) ack | findTag' a x = go s a xs (x:ack)
+                  | otherwise    = go s a xs ack
 
 
 
