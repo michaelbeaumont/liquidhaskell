@@ -81,7 +81,7 @@ prune cfg cbs target info
 solveCs cfg target cgi info 
   = solve fx target (hqFiles info) (cgInfoFInfo cgi)
   where 
-    fx = def { solver = smtsolver cfg }
+    fx = def { solver = smtsolver cfg, negVars = generalType cfg}
 
 writeCGI tgt cgi = {-# SCC "ConsWrite" #-} writeFile (extFileName Cgi tgt) str
   where 

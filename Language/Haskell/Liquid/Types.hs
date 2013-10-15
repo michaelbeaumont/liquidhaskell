@@ -139,6 +139,7 @@ data Config = Config {
   , notermination  :: Bool       -- ^ disable termination check
   , notruetypes    :: Bool       -- ^ disable truing top level types
   , totality       :: Bool       -- ^ check totality in definitions
+  , generalType    :: Bool       -- ^ find most general type
   , noPrune        :: Bool       -- ^ disable prunning unsorted Refinements
   , maxParams      :: Int        -- ^ the maximum number of parameters to accept when mining qualifiers
   , smtsolver      :: SMTSolver  -- ^ name of smtsolver to use [default: z3-API]  

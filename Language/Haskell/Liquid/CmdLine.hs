@@ -97,6 +97,10 @@ config = Config {
  , totality 
     = def &= help "Check totality"
 
+ , generalType
+    = def &= help "Generalize Inferred Types"
+          &= name "general-types"
+
  , smtsolver 
     = def &= help "Name of SMT-Solver" 
 
@@ -157,7 +161,7 @@ parsePragma s = withArgs [val s] $ cmdArgs config
 ---------------------------------------------------------------------------------------
 
 instance Monoid Config where
-  mempty        = Config def def def def def def def def def def 2 def
+  mempty        = Config def def def def def def def def def def def 2 def
   mappend c1 c2 = Config (sortNub $ files c1   ++     files          c2)
                          (sortNub $ idirs c1   ++     idirs          c2)
                          (diffcheck c1         ||     diffcheck      c2) 
@@ -167,6 +171,7 @@ instance Monoid Config where
                          (notermination  c1    ||     notermination  c2) 
                          (notruetypes    c1    ||     notruetypes    c2) 
                          (totality       c1    ||     totality       c2) 
+                         (generalType    c1    ||     generalType    c2) 
                          (noPrune        c1    ||     noPrune        c2) 
                          (maxParams      c1   `max`   maxParams      c2)
                          (smtsolver c1      `mappend` smtsolver      c2)
