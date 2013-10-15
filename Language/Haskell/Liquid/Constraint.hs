@@ -466,6 +466,7 @@ data CGInfo = CGInfo { hsCs       :: ![SubC]
                      , specLazy   :: !(S.HashSet Var)
                      , tyConEmbed :: !(F.TCEmb TC.TyCon)
                      , kuts       :: !(F.Kuts)
+                     , negs       :: !(F.Negs)
                      , lits       :: ![(F.Symbol, F.Sort)]
                      , tcheck     :: !Bool
                      , pruneRefs  :: !Bool
@@ -486,6 +487,8 @@ ppr_CGInfo cgi
   $$ (F.toFix  $ fixWfs cgi)
   $$ (text "*********** Fixpoint Kut Variables ************")
   $$ (F.toFix  $ kuts cgi)
+  $$ (text "*********** Fixpoint Neg Variables ************")
+  $$ (F.toFix  $ negs cgi)
   $$ (text "*********** Literals in Source     ************")
   $$ (pprint $ lits cgi)
 
@@ -505,6 +508,7 @@ initCGI cfg info = CGInfo {
                ++ specificationQualifiers (maxParams cfg) (info {spec = spec'})
   , tyConEmbed = tce  
   , kuts       = F.ksEmpty 
+  , negs       = F.nsEmpty 
   , lits       = coreBindLits tce info 
   , specDecr   = decr spc
   , specLVars  = lvars spc
@@ -636,7 +640,16 @@ addC !c@(SubC _ t1 t2) _msg
      modify $ \s -> s { hsCs  = c : (hsCs s) }
 
 addW   :: WfC -> CG ()  
-addW !w = modify $ \s -> s { hsWfs = w : (hsWfs s) }
+addW !w@(WfC _ t) 
+  = do modify $ \s -> s { hsWfs = w : (hsWfs s) }
+       modify $ \s -> s { negs  = F.nsUnion (negKVars True t) (negs s) }
+
+addSignedW :: Bool -> WfC -> CG ()  
+addSignedW sig !w@(WfC _ t) 
+  = do modify $ \s -> s { hsWfs = w : (hsWfs s) }
+       if useNegs 
+        then modify $ \s -> s { negs  = F.nsUnion (negKVars sig t) (negs s) }
+        else return ()
 
 addWarning   :: String -> CG ()  
 addWarning w = modify $ \s -> s { logWarn = w : (logWarn s) }
@@ -1029,7 +1042,7 @@ consE γ  e@(Lam x e1)
        γ'     <- ((γ, "consE") += (varSymbol x, tx))
        t1     <- consE γ' e1
        addIdA x (Def tx) 
-       addW   $ WfC γ tx 
+       addSignedW False  $ WfC γ tx 
        return $ rFun (varSymbol x) tx t1
     where FunTy τx _ = exprType e 
 
@@ -1227,7 +1240,8 @@ instance NFData CGInfo where
           ({-# SCC "CGIrnf8" #-}  rnf (annotMap x))   `seq`
           ({-# SCC "CGIrnf9" #-}  rnf (specQuals x))  `seq`
           ({-# SCC "CGIrnf10" #-} rnf (kuts x))       `seq`
-          ({-# SCC "CGIrnf10" #-} rnf (lits x)) 
+          ({-# SCC "CGIrnf11" #-} rnf (negs x))       `seq`
+          ({-# SCC "CGIrnf12" #-} rnf (lits x)) 
 
 -------------------------------------------------------------------------------
 --------------------- Reftypes from F.Fixpoint Expressions ----------------------
@@ -1396,6 +1410,7 @@ cgInfoFInfo cgi
          , F.gs    = globals cgi 
          , F.lits  = lits cgi 
          , F.kuts  = kuts cgi 
+         , F.negs  = negs cgi 
          , F.quals = specQuals cgi
          }
 

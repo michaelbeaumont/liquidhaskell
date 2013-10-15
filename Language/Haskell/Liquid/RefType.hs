@@ -42,7 +42,9 @@ module Language.Haskell.Liquid.RefType (
   , literalFRefType, literalFReft, literalConst
   , classBinds
   
-  
+ 
+  , negKVars
+
   , mkDataConIdsTy
   , mkTyConInfo 
   ) where
@@ -1047,5 +1049,21 @@ mkTyConInfo c = TyConInfo pos neg
         neutral       = [0..n] L.\\ (fst <$> varsigns)
 
 
-
+negKVars :: (PPrint r, Reftable r) => Bool -> RRType r -> [Symbol]
+negKVars = go
+  where
+   go s (RVar _ r)       = bgo s r
+   go s (RFun _ tx t r)  = go (not s) tx ++ go s t ++ bgo s r
+   go s (RAllT _ t)      = go s t
+   go s (RAllP _ t)      = go s t
+   go s (RCls _ ts)      = concatMap (go s) ts
+   go s (RApp _ ts rs r) = concatMap (go s) ts ++ concatMap (rgo s) rs ++ bgo s r
+   go s (RAppTy t1 t2 r) = go s t1 ++ go s t2 ++ bgo s r
+   go s t                = errorstar $ "RefType.negKVars: cannot handle" ++ showpp t
+ 
+   rgo s (RMono _ r)     = bgo s r
+   rgo s (RPoly _ t)     = go  s t
+ 
+   bgo s r = if s then [] else reftKVars $ toReft r
+          
 
