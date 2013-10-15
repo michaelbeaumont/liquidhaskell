@@ -158,17 +158,6 @@ for example, to disable termination checking (see below)
 
     {-@ LIQUID "--notermination" @-}
 
-Ignore False Predicates
------------------------
-
-[PLEASE EDIT: I have no idea what "ignoring false predicates means"]
-
-To ignore false predicates use the nofalse option
- 
-    liquid --nofalse test.hs
-
-See <a url="tests/neg/lazy.lhs">tests/neg/lazy.lhs</a>
-
 Prune Unsorted Predicates
 -------------------------
 
