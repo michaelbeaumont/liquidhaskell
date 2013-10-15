@@ -647,9 +647,7 @@ addW !w@(WfC _ t)
 addSignedW :: Bool -> WfC -> CG ()  
 addSignedW sig !w@(WfC _ t) 
   = do modify $ \s -> s { hsWfs = w : (hsWfs s) }
-       if useNegs 
-        then modify $ \s -> s { negs  = F.nsUnion (negKVars sig t) (negs s) }
-        else return ()
+       modify $ \s -> s { negs  = F.nsUnion (negKVars sig t) (negs s) }
 
 addWarning   :: String -> CG ()  
 addWarning w = modify $ \s -> s { logWarn = w : (logWarn s) }
