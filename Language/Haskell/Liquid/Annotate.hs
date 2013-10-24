@@ -16,7 +16,6 @@ module Language.Haskell.Liquid.Annotate (
 
   -- * Top-level annotation renderer function
   , annotate
-  , annotates
   ) where
 
 import GHC                      ( SrcSpan (..)
@@ -74,19 +73,6 @@ import qualified Data.Vector         as V
 -------------------------------------------------------------------
 ------ Rendering HTMLized source with Inferred Types --------------
 -------------------------------------------------------------------
-
-annotates :: FilePath -> FixResult Error -> [FixSolution] -> AnnInfo Annot -> IO ()
-annotates fname result sls anna | [sol] <- sls
-  = annotate fname result sol anna
-
-annotates fname result sls anna
-  = mapM_ (\(htmlFile, annm) -> annotDump fname htmlFile result annm) annms 
-    where
-      annm  = closeAnnots anna
-      annm' = (\sol -> tidySpecType <$> applySolution sol annm) <$> sls
-      htmls = [extFileName (Hi i) fname | i <- [1..20]]
-      annms = zip htmls annm'
- 
 
 annotate :: FilePath -> FixResult Error -> FixSolution -> AnnInfo Annot -> IO ()
 annotate fname result sol anna 

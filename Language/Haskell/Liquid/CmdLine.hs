@@ -95,7 +95,7 @@ config = Config {
     = def &= help "Check totality"
 
  , generalType
-    = def &= help "Generalize Inferred Types"
+    = True &= help "Generalize Inferred Types"
           &= name "general-types"
 
  , smtsolver 
@@ -187,7 +187,7 @@ instance Monoid SMTSolver where
 exitWithResult :: FilePath -> Maybe Output -> ErrorResult -> IO ErrorResult
 exitWithResult target o r = writeExit target r $ fromMaybe emptyOutput o
 
-writeExit target r out   = do {-# SCC "annotate" #-} annotates target r (o_soln out) (o_annot out)
+writeExit target r out   = do {-# SCC "annotate" #-} annotate target r (o_soln out) (o_annot out)
                               donePhase Loud "annotate"
                               let rs = showFix r
                               writeResult (colorResult r) r 
@@ -209,7 +209,6 @@ writeResult c            = mapM_ (writeDoc c) . resDocs
     writeBlock c _       = return ()
 
 
-resDocs (Sol n)           = [int n <+> text "Solutions"]
 resDocs Safe              = [text "SAFE"]
 resDocs (Crash xs s)      = text ("CRASH: " ++ s) : pprManyOrdered "CRASH: " xs
 resDocs (Unsafe xs)       = pprManyOrdered "UNSAFE: " xs
@@ -233,8 +232,8 @@ instance Fixpoint (FixResult Error) where
 
 data Output = O { o_vars   :: Maybe [Name] 
                 , o_warns  :: [String]
-                , o_soln   :: [FixSolution] 
+                , o_soln   :: FixSolution
                 , o_annot  :: !(AnnInfo Annot)
                 }
 
-emptyOutput = O Nothing [] [M.empty] mempty 
+emptyOutput = O Nothing [] M.empty mempty 
