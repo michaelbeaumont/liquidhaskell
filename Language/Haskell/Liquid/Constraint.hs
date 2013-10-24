@@ -91,6 +91,7 @@ consAct info penv
        foldM consCBTop γ (cbs info)
        hcs <- hsCs  <$> get 
        hws <- hsWfs <$> get
+       resetIndex
        fcs <- concat <$> mapM splitC hcs 
        fws <- concat <$> mapM splitW hws
        modify $ \st -> st { fixCs = fcs } { fixWfs = fws }
@@ -136,6 +137,7 @@ measEnv sp penv xts cbs lts
         , tgKey = Nothing
         , trec  = Nothing
         , lcb   = M.empty
+        , gid   = 0
         } 
     where tce = tcEmbeds sp
 
@@ -164,11 +166,14 @@ data FEnv = FE { fe_binds :: !F.IBindEnv      -- ^ Integer Keys for Fixpoint Env
                }
 
 insertFEnv (FE benv env) ((x, t), i)
-  = FE (F.insertsIBindEnv [i] benv) (F.insertSEnv x t env)
+  = FE (F.insertsIBindEnv [i] benv) $ F.insertSEnv x t env
 
 insertsFEnv = L.foldl' insertFEnv
 
 initFEnv init = FE F.emptyIBindEnv $ F.fromListSEnv (wiredSortedSyms ++ init)
+
+
+newFunction γ = γ{gid = (gid γ)+1}
 
 data CGEnv 
   = CGE { loc    :: !SrcSpan           -- ^ Location in original source file
@@ -184,6 +189,7 @@ data CGEnv
         , tgKey :: !(Maybe Tg.TagKey)  -- ^ Current top-level binder
         , trec  :: !(Maybe (M.HashMap F.Symbol SpecType)) -- ^ Type of recursive function with decreasing constraints
         , lcb   :: !(M.HashMap F.Symbol CoreExpr) -- ^ Let binding that have not been checked
+        , gid   :: !Integer
         } -- deriving (Data, Typeable)
 
 instance PPrint CGEnv where
@@ -305,10 +311,14 @@ rsplitW γ (RPoly ss t0)
        splitW $ WfC γ' t0
 
 bsplitW :: CGEnv -> SpecType -> CG [FixWfC]
-bsplitW γ t = pruneRefs <$> get >>= return . bsplitW' γ t
+bsplitW γ t 
+  = do flag   <- pruneRefs <$> get 
+       wid    <- fresh
+       addDep  $ (gid γ, wid)
+       return  $ bsplitW' γ t wid flag
 
-bsplitW' γ t pflag
-  | F.isNonTrivialSortedReft r' = [F.wfC (fe_binds $ fenv γ) r' Nothing ci] 
+bsplitW' γ t i pflag
+  | F.isNonTrivialSortedReft r' = [F.wfC (fe_binds $ fenv γ) r' (Just i) ci] 
   | otherwise                   = []
   where 
     r'                          = rTypeSortedReft' pflag γ t
@@ -414,13 +424,17 @@ rsplitCIndexed γ t1s t2s indexes
         t2s' = (L.!!) t2s <$> indexes
 
 
-bsplitC γ t1 t2 = pruneRefs <$> get >>= return . bsplitC' γ t1 t2
+bsplitC γ t1 t2 = 
+  do flag <- pruneRefs <$> get 
+     sid  <- fresh
+     addDep $ (gid γ, sid)
+     return $ bsplitC' γ t1 t2 sid flag
 
-bsplitC' γ t1 t2 pflag
+bsplitC' γ t1 t2 i pflag
   | F.isFunctionSortedReft r1' && F.isNonTrivialSortedReft r2'
-  = [F.subC γ' F.PTrue (r1' {F.sr_reft = F.top}) r2' Nothing tag ci]
+  = [F.subC γ' F.PTrue (r1' {F.sr_reft = F.top}) r2' (Just i) tag ci]
   | F.isNonTrivialSortedReft r2'
-  = [F.subC γ' F.PTrue r1'  r2' Nothing tag ci]
+  = [F.subC γ' F.PTrue r1'  r2' (Just i) tag ci]
   | otherwise
   = []
   where 
@@ -465,10 +479,12 @@ data CGInfo = CGInfo { hsCs       :: ![SubC]
                      , specLVars  :: !(S.HashSet Var)
                      , specLazy   :: !(S.HashSet Var)
                      , tyConEmbed :: !(F.TCEmb TC.TyCon)
+                     , deps       :: !(F.Deps)
                      , kuts       :: !(F.Kuts)
                      , negs       :: !(F.Negs)
                      , lits       :: ![(F.Symbol, F.Sort)]
                      , tcheck     :: !Bool
+                     , generalTy  :: !Bool
                      , pruneRefs  :: !Bool
                      , logWarn    :: ![String]
                      } -- deriving (Data, Typeable)
@@ -485,6 +501,8 @@ ppr_CGInfo cgi
   $$ (F.toFix  $ fixCs cgi)
   $$ (text "*********** Fixpoint WFConstraints ************")
   $$ (F.toFix  $ fixWfs cgi)
+  $$ (text "*********** Fixpoint Dependencies *************")
+  $$ (F.toFix  $ deps cgi)
   $$ (text "*********** Fixpoint Kut Variables ************")
   $$ (F.toFix  $ kuts cgi)
   $$ (text "*********** Fixpoint Neg Variables ************")
@@ -507,6 +525,7 @@ initCGI cfg info = CGInfo {
   , specQuals  =  qualifiers spc
                ++ specificationQualifiers (maxParams cfg) (info {spec = spec'})
   , tyConEmbed = tce  
+  , deps       = F.dsEmpty 
   , kuts       = F.ksEmpty 
   , negs       = F.nsEmpty 
   , lits       = coreBindLits tce info 
@@ -514,6 +533,7 @@ initCGI cfg info = CGInfo {
   , specLVars  = lvars spc
   , specLazy   = lazy spc
   , tcheck     = not $ notermination cfg
+  , generalTy  = generalType cfg
   , pruneRefs  = not $ noPrune cfg
   , logWarn    = []
   } 
@@ -639,15 +659,17 @@ addC !c@(SubC _ t1 t2) _msg
   = -- trace ("addC " ++ _msg++ showpp t1 ++ "\n <: \n" ++ showpp t2 ) $
      modify $ \s -> s { hsCs  = c : (hsCs s) }
 
+resetIndex = modify $ \s -> s{freshIndex = 0}
+
 addW   :: WfC -> CG ()  
 addW !w@(WfC _ t) 
-  = do modify $ \s -> s { hsWfs = w : (hsWfs s) }
-       modify $ \s -> s { negs  = F.nsUnion (negKVars True t) (negs s) }
+  = modify $ \s -> s { hsWfs = w : (hsWfs s) }
 
-addSignedW :: Bool -> WfC -> CG ()  
-addSignedW sig !w@(WfC _ t) 
-  = do modify $ \s -> s { hsWfs = w : (hsWfs s) }
-       modify $ \s -> s { negs  = F.nsUnion (negKVars sig t) (negs s) }
+addNeg t = 
+  do flag <- generalTy <$> get
+     if flag 
+       then modify $ \s -> s { negs  = F.nsUnion (negKVars True t) (negs s) }
+       else return ()
 
 addWarning   :: String -> CG ()  
 addWarning w = modify $ \s -> s { logWarn = w : (logWarn s) }
@@ -660,6 +682,11 @@ addKuts !t  = modify $ \s -> s { kuts = updKuts (kuts s) t }
     updKuts :: F.Kuts -> SpecType -> F.Kuts
     updKuts = foldReft (F.ksUnion . (F.reftKVars . ur_reft) )
 
+addDep     :: (Integer, Integer) -> CG ()
+addDep !d  = 
+  do flag <- generalTy <$> get 
+     if flag then modify $ \s -> s { deps = F.dsAdd d (deps s) }
+             else return ()
 
 -- | Used for annotation binders (i.e. at binder sites)
 
@@ -826,16 +853,16 @@ checkValidHint x ts f n
 
 consCBLet γ cb
   = do tflag <- tcheck <$> get
-       consCB tflag γ cb
+       consCB False tflag γ cb
 
 consCBTop γ cb
   = do oldtcheck <- tcheck <$> get
        strict    <- specLazy <$> get
        let tflag  = oldtcheck && (tcond cb strict)
        modify $ \s -> s{tcheck = tflag}
-       γ' <- consCB tflag γ cb
+       γ' <- consCB True tflag γ cb
        modify $ \s -> s{tcheck = oldtcheck}
-       return γ'
+       return $ newFunction γ'
 
 tcond cb strict
   = not $ any (\x -> S.member x strict || isInternal x) (binds cb)
@@ -843,11 +870,11 @@ tcond cb strict
         binds (Rec xes)    = fst $ unzip xes
 
 -------------------------------------------------------------------
-consCB :: Bool -> CGEnv -> CoreBind -> CG CGEnv 
+consCB :: Bool -> Bool -> CGEnv -> CoreBind -> CG CGEnv 
 -------------------------------------------------------------------
 
-consCB tflag γ (Rec xes) | tflag
-  = do xets     <- forM xes $ \(x, e) -> liftM (x, e,) (varTemplate γ (x, Just e))
+consCB isTop tflag γ (Rec xes) | tflag
+  = do xets     <- forM xes $ \(x, e) -> liftM (x, e,) (varTemplate isTop γ (x, Just e))
        ts       <- mapM refreshArgs $ (fromJust . thd3 <$> xets)
        let vs    = zipWith collectArgs ts es
        is       <- checkSameLens <$> mapM makeDecrIndex (zip xs ts)
@@ -879,17 +906,18 @@ consCB tflag γ (Rec xes) | tflag
 
 -- TODO : no termination check:
 -- check that the result type is trivial!
-consCB _ γ (Rec xes) 
-  = do xets   <- forM xes $ \(x, e) -> liftM (x, e,) (varTemplate γ (x, Just e))
+consCB isTop _ γ (Rec xes) 
+  = do xets   <- forM xes $ \(x, e) -> liftM (x, e,) (varTemplate isTop γ (x, Just e))
        let xts = [(x, to) | (x, _, to) <- xets, not (isGrty x)]
        γ'     <- foldM extender (γ `withRecs` (fst <$> xts)) xts
        mapM_ (consBind True γ') xets
        return γ' 
     where isGrty x = (varSymbol x) `memberREnv` (grtys γ)
 
-consCB _ γ (NonRec x e)
-  = do to  <- varTemplate γ (x, Nothing) 
+consCB isTop _ γ (NonRec x e)
+  = do to  <- varTemplate isTop γ (x, Nothing) 
        to' <- consBind False γ (x, e, to)
+       if isTop && isJust to' then addNeg (fromJust to') else return ()
        extender γ (x, to')
 
 
@@ -919,12 +947,13 @@ extender γ _           = return γ
 addBinders γ0 x' cbs   = foldM (++=) (γ0 -= x') [("addBinders", x, t) | (x, t) <- cbs]
 
 
-varTemplate :: CGEnv -> (Var, Maybe CoreExpr) -> CG (Maybe SpecType)
-varTemplate γ (x, eo)
+varTemplate :: Bool -> CGEnv -> (Var, Maybe CoreExpr) -> CG (Maybe SpecType)
+varTemplate isTop γ (x, eo)
   = case (eo, lookupREnv (varSymbol x) (grtys γ)) of
       (_, Just t) -> return $ Just t
       (Just e, _) -> do t  <- unifyVar γ x <$> freshTy_pretty e (exprType e)
                         addW (WfC γ t)
+                        if isTop then addNeg t else return ()
                         addKuts t
                         return $ Just t
       (_,      _) -> return Nothing
@@ -959,7 +988,7 @@ cconsE γ (Let b e) t
        cconsE γ' e t 
 
 cconsE γ (Case e x _ cases) t 
-  = do γ'  <- consCB False γ $ NonRec x e
+  = do γ'  <- consCB False False γ $ NonRec x e
        forM_ cases $ cconsCase γ' x t nonDefAlts 
     where nonDefAlts = [a | (a, _, _) <- cases, a /= DEFAULT]
 
@@ -1037,10 +1066,10 @@ consE γ (Lam α e) | isTyVar α
 
 consE γ  e@(Lam x e1) 
   = do tx     <- freshTy (Var x) τx 
+       addW    $ WfC γ tx
        γ'     <- ((γ, "consE") += (varSymbol x, tx))
        t1     <- consE γ' e1
-       addIdA x (Def tx) 
-       addSignedW False  $ WfC γ tx 
+       addIdA x (Def tx)
        return $ rFun (varSymbol x) tx t1
     where FunTy τx _ = exprType e 
 
@@ -1203,7 +1232,7 @@ subsTyVar_meet' (α, t) = subsTyVar_meet (α, toRSort t, t)
 -----------------------------------------------------------------------
 
 instance NFData CGEnv where
-  rnf (CGE x1 x2 x3 x4 x5 x6 x7 x8 _ x9 x10 _ _) 
+  rnf (CGE x1 x2 x3 x4 x5 x6 x7 x8 _ x9 x10 _ _ _) 
     = x1 `seq` rnf x2 `seq` seq x3 `seq` x4 `seq` rnf x5 `seq` 
       rnf x6  `seq` x7 `seq` rnf x8 `seq` rnf x9 `seq` rnf x10
 
@@ -1409,6 +1438,7 @@ cgInfoFInfo cgi
          , F.lits  = lits cgi 
          , F.kuts  = kuts cgi 
          , F.negs  = negs cgi 
+         , F.deps  = deps cgi 
          , F.quals = specQuals cgi
          }
 
