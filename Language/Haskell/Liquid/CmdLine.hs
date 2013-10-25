@@ -95,7 +95,7 @@ config = Config {
     = def &= help "Check totality"
 
  , generalType
-    = True &= help "Generalize Inferred Types"
+    = def &= help "Generalize Inferred Types"
           &= name "general-types"
 
  , smtsolver 
