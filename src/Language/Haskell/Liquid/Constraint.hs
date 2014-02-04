@@ -114,7 +114,7 @@ initEnv info penv
        let tcb   = mapSnd (rTypeSort tce ) <$> concat bs
        let γ0    = measEnv (spec info) penv (head bs) (cbs info) (tcb ++ lts)
        mapM_ (addW . WfC γ0) (catMaybes ks)
-       foldM (++=) γ0 [("initEnv", x, y) | (x, y) <- concat bs]
+       foldM (++++=) γ0 [("initEnv", x, y) | (x, y) <- concat bs]
   where
     refreshArgs' = mapM (mapSndM refreshArgs)
     refreshKs    = mapM (mapSndM refreshK)
@@ -604,7 +604,18 @@ extendEnvWithVV γ t
        let γ' = γ { renv = insertREnv x t (renv γ) }  
        pflag <- pruneRefs <$> get
        is    <- if isBase t 
-                  then liftM single $ addBind x $ rTypeSortedReft' pflag γ' t 
+                  then liftM single $ addBind x $ rTypeSortedReft' pflag γ' (fmap F.top t) 
+                  else addClassBind t 
+       return $ γ' { fenv = insertsFEnv (fenv γ) is }
+
+(++++=) :: CGEnv -> (String, F.Symbol, SpecType) -> CG CGEnv
+γ ++++= (_, x, t') 
+  = do idx   <- fresh
+       let t  = normalize γ {-x-} idx t'  
+       let γ' = γ { renv = insertREnv x t (renv γ) }  
+       pflag <- pruneRefs <$> get
+       is    <- if isBase t 
+                  then liftM single $ addBind x $ rTypeSortedReft' pflag γ' t
                   else addClassBind t 
        return $ γ' { fenv = insertsFEnv (fenv γ) is }
 
@@ -1055,6 +1066,7 @@ extender γ (x, Just t) = γ ++= ("extender", F.symbol x, t)
 extender γ _           = return γ
 
 addBinders γ0 x' cbs   = foldM (++=) (γ0 -= x') [("addBinders", x, t) | (x, t) <- cbs]
+whnfAddBinders γ0 x' cbs   = foldM (++++=) (γ0 -= x') [("addBinders", x, t) | (x, t) <- cbs]
 
 -- | @varTemplate@ is only called with a `Just e` argument when the `e`
 -- corresponds to the body of a @Rec@ binder.
@@ -1316,13 +1328,13 @@ caseEnv γ x _   (DataAlt c) ys
        let xt            = xt0 `strengthen` (uTop (r1 `F.meet` r2))
        let cbs           = safeZip "cconsCase" (x':ys') (xt0:yts)
        cγ'              <- addBinders γ x' cbs
-       cγ               <- addBinders cγ' x' [(x', xt)]
+       cγ               <- whnfAddBinders cγ' x' [(x', xt)]
        return cγ 
 
 caseEnv γ x acs a _ 
   = do let x'  = F.symbol x
        xt'    <- (`strengthen` uTop (altReft γ acs a)) <$> (γ ??= x')
-       cγ     <- addBinders γ x' [(x', xt')]
+       cγ     <- whnfAddBinders γ x' [(x', xt')]
        return cγ
 
 -- cconsCase γ x t _ (DataAlt c, ys, ce) 

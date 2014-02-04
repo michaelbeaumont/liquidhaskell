@@ -1,11 +1,8 @@
-module Fixme (foo) where
+module Fixme  where
 
--- isEven 0 = True
--- isEven n = isEven $ n - 1
+import Prelude hiding (head)
+import Language.Haskell.Liquid.Prelude
 
-incr x = (x, x+1)
-
-{-@ foo :: x:Int -> {v:Int | v > x } @-}
-foo :: Int -> Int
-foo x = y
-  where (w, y) = incr x
+{-@ foo :: a -> {v:Bool| (Prop v) } @-}
+foo :: a -> Bool
+foo _ = 0==0
