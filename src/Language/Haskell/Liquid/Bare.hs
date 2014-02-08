@@ -965,6 +965,9 @@ isCon []     = False
 maxArity :: Arity 
 maxArity = 7
 
+listCoInfo   = Nothing -- Just True
+listSizeInfo = \x -> EApp (dummyLoc $ S "len") [EVar x]
+
 wiredTyDataCons :: ([(TyCon, TyConP)] , [(DataCon, DataConP)])
 wiredTyDataCons = (concat tcs, concat dcs)
   where 
@@ -972,7 +975,8 @@ wiredTyDataCons = (concat tcs, concat dcs)
     l           = [listTyDataCons] ++ map tupleTyDataCons [1..maxArity]
 
 listTyDataCons :: ([(TyCon, TyConP)] , [(DataCon, DataConP)])
-listTyDataCons   = ( [(c, TyConP [(RTV tyv)] [p] [0] [] (Just fsize))]
+listTyDataCons   = ( [(c, TyConP [(RTV tyv)] [p] [0] [] 
+                                 listSizeInfo listCoInfo)]
                    , [(nilDataCon , DataConP [(RTV tyv)] [p] [] [] lt)
                    , (consDataCon, DataConP [(RTV tyv)] [p] [] cargs  lt)])
     where c      = listTyCon
@@ -987,10 +991,9 @@ listTyDataCons   = ( [(c, TyConP [(RTV tyv)] [p] [0] [] (Just fsize))]
           xt     = rVar tyv
           xst    = rApp c [RVar (RTV tyv) px] [RMono [] $ pdVarReft p] mempty
           cargs  = [(xs, xst), (x, xt)]
-          fsize  = \x -> EApp (dummyLoc $ S "len") [EVar x]
 
 tupleTyDataCons :: Int -> ([(TyCon, TyConP)] , [(DataCon, DataConP)])
-tupleTyDataCons n = ( [(c, TyConP (RTV <$> tyvs) ps [0..(n-2)] [] Nothing)]
+tupleTyDataCons n = ( [(c, TyConP (RTV <$> tyvs) ps [0..(n-2)] [] Nothing (Just False))]
                     , [(dc, DataConP (RTV <$> tyvs) ps []  cargs  lt)])
   where c             = tupleTyCon BoxedTuple n
         dc            = tupleCon BoxedTuple n 
@@ -1149,7 +1152,7 @@ makeConTypes' :: [DataDecl] -> BareM ([(TyCon, TyConP)], [[(DataCon, DataConP)]]
 makeConTypes' dcs = unzip <$> mapM ofBDataDecl dcs
 
 ofBDataDecl :: DataDecl -> BareM ((TyCon, TyConP), [(DataCon, DataConP)])
-ofBDataDecl (D tc as ps cts pos sfun)
+ofBDataDecl (D tc as ps cts pos sfun coi)
   = do πs    <- mapM ofBPVar ps
        tc'   <- lookupGhcTyCon tc
        cts'  <- mapM (ofBDataCon tc' αs ps πs) cts
@@ -1158,7 +1161,7 @@ ofBDataDecl (D tc as ps cts pos sfun)
        let varInfo = concatMap (getPsSig initmap True) tys
        let cov     = [i | (i, b)<- varInfo, b, i >=0]
        let contr   = [i | (i, b)<- varInfo, not b, i >=0]
-       return ((tc', TyConP αs πs cov contr sfun), cts')
+       return ((tc', TyConP αs πs cov contr sfun coi), cts')
     where αs   = fmap (RTV . stringTyVar) as
           -- cpts = fmap (second (fmap (second (mapReft ur_pred)))) cts
 

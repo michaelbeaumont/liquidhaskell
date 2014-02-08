@@ -60,6 +60,7 @@ import qualified Language.Fixpoint.Types            as F
 import Language.Fixpoint.Names (dropModuleNames)
 import Language.Fixpoint.Sort (pruneUnsortedReft)
 
+import Language.Haskell.Liquid.Productivity  (checkProductiveExpr)
 import Language.Haskell.Liquid.Fresh
 
 import Language.Haskell.Liquid.Types            hiding (binds, Loc, loc, freeTyVars, Def)
@@ -70,7 +71,7 @@ import Language.Haskell.Liquid.RefType
 import Language.Haskell.Liquid.PredType         hiding (freeTyVars)          
 import Language.Haskell.Liquid.Predicates
 import Language.Haskell.Liquid.PrettyPrint
-import Language.Haskell.Liquid.GhcMisc          (isInternal, collectArguments, getSourcePos, pprDoc, tickSrcSpan, hasBaseTypeVar, showPpr)
+import Language.Haskell.Liquid.GhcMisc          (isInternal, collectArguments, getSourcePos, pprDoc, tickSrcSpan, hasBaseTypeVar, showPpr, resultType)
 import Language.Haskell.Liquid.Misc
 import Language.Fixpoint.Misc
 import Language.Haskell.Liquid.Qualifier
@@ -128,9 +129,9 @@ initEnv info penv
     extract = unzip . map (\(v,(k,t)) -> (k,(v,t)))
   -- where tce = tcEmbeds $ spec info
 
-instance Show Var where
-  show = showPpr
-
+-- instance Show Var where
+--   show = showPpr
+-- 
 ctor' = map (mapSnd val) . ctors
 
 unifyts' tce tyi penv = (second (addTyConInfo tce tyi)) . (unifyts penv)
@@ -999,14 +1000,24 @@ makeTermEnvs γ xtes xes ts ts'
         mkSub ys ys' = F.mkSubst [(x, F.EVar y) | (x, y) <- zip ys ys']
         collectArgs  = collectArguments . length . fst3 . bkArrow . thd3 . bkUniv
         err x = "Constant: makeTermEnvs: no terminating expression for " ++ showPpr x 
-       
+      
+isProductive γ (x,es) 
+  = do b <- liftM (isTyProductive) $ trueTy (resultType t)
+       if b
+         then return $ checkProductiveExpr es
+         else return $ False
+  where t = varType x     
+
 consCB tflag γ (Rec xes) | tflag 
   = do texprs <- termExprs <$> get
-       modify $ \i -> i { recCount = recCount i + length xes }
-       let xxes = catMaybes $ (`lookup` texprs) <$> xs
-       if null xxes 
-         then consCBSizedTys tflag γ (Rec xes)
-         else check xxes <$> consCBWithExprs γ xxes (Rec xes)
+       prod   <- liftM and (mapM (isProductive γ) xes)
+       if prod 
+         then consCB False γ (Rec xes)
+         else do modify $ \i -> i { recCount = recCount i + length xes }
+                 let xxes = catMaybes $ (`lookup` texprs) <$> xs
+                 if null xxes 
+                   then consCBSizedTys tflag γ (Rec xes)
+                   else check xxes <$> consCBWithExprs γ xxes (Rec xes)
   where xs = fst $ unzip xes
         check ys r | length ys == length xs = r
                    | otherwise              = errorstar err
@@ -1369,8 +1380,8 @@ instantiatePvs = foldl' go
   where go (RAllP p tbody) r = replacePreds "instantiatePv" tbody [(p, r)]
         go _ _               = errorstar "Constraint.instanctiatePv" 
 
-instance Show CoreExpr where
-  show = showPpr
+-- instance Show CoreExpr where
+--   show = showPpr
 
 checkTyCon _ t@(RApp _ _ _ _) = t
 checkTyCon x t                = checkErr x t --errorstar $ showPpr x ++ "type: " ++ showPpr t

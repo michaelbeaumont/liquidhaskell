@@ -123,6 +123,7 @@ Library
                     Language.Haskell.Liquid.ACSS, 
                     Language.Haskell.Liquid.DiffCheck, 
                     Language.Haskell.Liquid.ANFTransform, 
+                    Language.Haskell.Liquid.Productivity, 
                     Language.Haskell.Liquid.Annotate, 
                     Language.Haskell.Liquid.CTags,
                     Language.Haskell.Liquid.CmdLine, 

@@ -43,7 +43,7 @@ import Control.Monad.State
 makeTyConInfo = hashMapMapWithKey mkRTyCon . M.fromList
 
 mkRTyCon ::  TC.TyCon -> TyConP -> RTyCon
-mkRTyCon tc (TyConP αs' ps cv conv size) = RTyCon tc pvs' (mkTyConInfo tc cv conv size)
+mkRTyCon tc (TyConP αs' ps cv conv size coi) = RTyCon tc pvs' (mkTyConInfo tc cv conv size coi)
   where τs   = [rVar α :: RSort |  α <- TC.tyConTyVars tc]
         pvs' = subts (zip αs' τs) <$> ps
 
@@ -62,7 +62,7 @@ dataConPSpecType dc (DataConP vs ps cs yts rt) = mkArrow vs ps ts' rt'
 
 
 instance PPrint TyConP where
-  pprint (TyConP vs ps _ _ _) 
+  pprint (TyConP vs ps _ _ _ _) 
     = (parens $ hsep (punctuate comma (map pprint vs))) <+>
       (parens $ hsep (punctuate comma (map pprint ps)))
 
@@ -377,7 +377,7 @@ rpredType ts = RApp tyc ts [] mempty
   where 
     tyc      = RTyCon (stringTyCon 'x' 42 predName) [] defaultTyConInfo
 
-defaultTyConInfo = TyConInfo [] [] [] [] Nothing
+defaultTyConInfo = TyConInfo [] [] [] [] Nothing Nothing
 
 ----------------------------------------------------------------------------
 exprType :: CoreExpr -> Type

@@ -24,6 +24,7 @@ import Language.Fixpoint.Types (sinfo, showFix, isFalse)
 import qualified Language.Haskell.Liquid.DiffCheck as DC
 import Language.Haskell.Liquid.Misc
 import Language.Haskell.Liquid.Types
+import Language.Haskell.Liquid.Productivity (productivityAnalysis)
 import Language.Haskell.Liquid.CmdLine
 import Language.Haskell.Liquid.GhcInterface
 import Language.Haskell.Liquid.Constraint       
@@ -44,6 +45,10 @@ liquidOne target info =
                     putStrLn "*************** Original CoreBinds ***************************" 
                     putStrLn $ showpp (cbs info)
      let cbs' = transformScope (cbs info)
+
+     putStrLn "****************** Syntactic Productivity Analysis ****************"
+     putStrLn $ showpp $ productivityAnalysis cbs'
+     putStrLn "****************** DONE:  Productivity Analysis ****************"
      whenLoud  $ do donePhase Loud "transformRecExpr"
                     putStrLn "*************** Transform Rec Expr CoreBinds *****************" 
                     putStrLn $ showpp cbs'

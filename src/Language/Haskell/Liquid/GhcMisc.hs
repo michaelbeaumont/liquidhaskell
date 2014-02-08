@@ -295,3 +295,8 @@ ignoreInline x = x {pm_parsed_source = go <$> pm_parsed_source x}
   where go  x = x {hsmodDecls = filter go' $ hsmodDecls x}
         go' x | SigD (InlineSig _ _) <-  unLoc x = False
               | otherwise                        = True
+
+
+resultType (ForAllTy _ t) = resultType t
+resultType (FunTy _ t)    = resultType t
+resultType t              = t

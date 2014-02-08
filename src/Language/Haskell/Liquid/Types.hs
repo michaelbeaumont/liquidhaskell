@@ -58,7 +58,7 @@ module Language.Haskell.Liquid.Types (
   , mapReft, mapReftM
   , mapBot, mapBind
   
-  , isTrivial
+  , isTrivial, isTyProductive
   
   -- * Converting To and From Sort
   , ofRSort, toRSort
@@ -263,6 +263,7 @@ data TyConP = TyConP { freeTyVarsTy :: ![RTyVar]
                      , covPs        :: ![Int] -- indexes of covariant predicate arguments
                      , contravPs    :: ![Int] -- indexes of contravariant predicate arguments
                      , sizeFun      :: !(Maybe (Symbol -> Expr))
+                     , isCoInduct   :: !(Maybe Bool)
                      }
 
 data DataConP = DataConP { freeTyVars :: ![RTyVar]
@@ -389,6 +390,8 @@ data TyConInfo = TyConInfo
   , covariantPsArgs     :: ![Int] -- indexes of covariant predicate arguments
   , contravariantPsArgs :: ![Int] -- indexes of contravariant predicate arguments
   , sizeFunction        :: !(Maybe (Symbol -> Expr))
+  , isCoinductive       :: !(Maybe Bool) -- Just [True | False] it is | it isn't
+                                         -- Nothing -> Both occurences 
   }
 
 
@@ -529,6 +532,7 @@ data DataDecl   = D { tycName   :: LocString
                                 -- ^ Source Position
                     , tycSFun   :: (Maybe (Symbol -> Expr))
                                 -- ^ Measure that should decrease in recursive calls
+                    , tycDoInfo :: !(Maybe Bool)
                     }
      --              deriving (Show) 
 
@@ -674,6 +678,12 @@ pappSym n  = S $ "papp" ++ show n
 ---------------------------------------------------------------
 
 isTrivial t = foldReft (\r b -> isTauto r && b) True t
+
+isTyProductive (RApp c _ _ _)
+  | Just b <- coinfo = b
+  | otherwise        = False
+  where coinfo = isCoinductive $ rTyConInfo c 
+isTyProductive _ = False
 
 instance Functor UReft where
   fmap f (U r p) = U (f r) p

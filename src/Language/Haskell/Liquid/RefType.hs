@@ -329,7 +329,7 @@ normalizePds t = addPds ps t'
   where (t', ps) = nlzP [] t
 
 rPred p t = RAllP p t
-rApp c    = RApp (RTyCon c [] (mkTyConInfo c [] [] Nothing)) 
+rApp c    = RApp (RTyCon c [] (mkTyConInfo c [] [] Nothing Nothing)) 
 rEx xts t = foldr (\(x, tx) t -> REx x tx t) t xts   
 
 addPds ps (RAllT v t) = RAllT v $ addPds ps t
@@ -1079,7 +1079,7 @@ ppError (ErrOther s)
 ppVar v = text "`" <> v <> text "'"
 -------------------------------------------------------------------------------
 
-mkTyConInfo :: TyCon -> [Int] -> [Int] -> (Maybe (Symbol -> Expr)) -> TyConInfo
+mkTyConInfo :: TyCon -> [Int] -> [Int] -> (Maybe (Symbol -> Expr)) -> (Maybe Bool) -> TyConInfo
 mkTyConInfo c = TyConInfo pos neg
   where pos       = neutral ++ [i | (i, b) <- varsigns, b, i /= dindex]
         neg       = neutral ++ [i | (i, b) <- varsigns, not b, i /= dindex]

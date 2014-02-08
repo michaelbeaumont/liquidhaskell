@@ -445,7 +445,9 @@ specP
     <|> (reserved "instance"  >> reserved "measure" >> liftM IMeas iMeasureP)
     <|> (reserved "class"     >> liftM Class  classP    )
     <|> (reserved "import"    >> liftM Impt   symbolP   )
-    <|> (reserved "data"      >> liftM DDecl  dataDeclP )
+    <|> (reserved "data"      >> liftM DDecl  (dataDeclP (Just False)))
+    <|> (reserved "mdata"     >> liftM DDecl  (dataDeclP Nothing))
+    <|> (reserved "codata"    >> liftM DDecl  (dataDeclP (Just True)))
     <|> (reserved "include"   >> liftM Incl   filePathP )
     <|> (reserved "invariant" >> liftM Invt   invariantP)
     <|> (reserved "type"      >> liftM Alias  aliasP    )
@@ -655,30 +657,40 @@ dataSizeP
   <|> return Nothing
   where mkFun s = \x -> EApp (stringSymbol <$> s) [EVar x]
 
-dataDeclP 
-   =  try dataDeclFullP
-  <|> dataDeclSizeP
+dataDeclP coi 
+   =  try (dataDeclFullP coi)
+  <|> (dataDeclSizeP coi)
+  <|> (dataDeclCoInfoP  coi)
 
-dataDeclSizeP
+dataDeclSizeP coi
   = do pos <- getPosition
        x   <- locUpperIdP
        spaces
-       fsize <- dataSizeP
-       return $ D x [] [] [] pos fsize
+       fsize <- liftM (checkComp x coi) dataSizeP 
+       return $ D x [] [] [] pos fsize coi
 
-dataDeclFullP
+dataDeclCoInfoP coi
   = do pos <- getPosition
        x   <- locUpperIdP
        spaces
-       fsize <- dataSizeP
+       return $ D x [] [] [] pos Nothing coi
+
+dataDeclFullP coi
+  = do pos <- getPosition
+       x   <- locUpperIdP
+       spaces
+       fsize <- liftM (checkComp x coi) dataSizeP
        spaces
        ts  <- sepBy tyVarIdP spaces
        ps  <- predVarDefsP
        whiteSpace >> reservedOp "=" >> whiteSpace
        dcs <- sepBy dataConP (reserved "|")
        whiteSpace
-       return $ D x ts ps dcs pos fsize
+       return $ D x ts ps dcs pos fsize coi
 
+checkComp c (Just True) (Just _) = errorstar msg
+  where msg = "size cannot be defined for coinductive type " ++ show c
+checkComp _ _ fsize = fsize
 ---------------------------------------------------------------------
 ------------ Interacting with Fixpoint ------------------------------
 ---------------------------------------------------------------------
