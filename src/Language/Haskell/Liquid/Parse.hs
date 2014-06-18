@@ -431,6 +431,7 @@ data Pspec ty ctor
   | IAlias  (Located ty, Located ty)
   | Alias   (RTAlias String BareType)
   | PAlias  (RTAlias Symbol Pred)
+  | EAlias  (RTAlias Symbol Expr)
   | Embed   (Located String, FTycon)
   | Qualif  Qualifier
   | Decr    (LocSymbol, [Int])
@@ -457,6 +458,7 @@ mkSpec name xs         = (name,)
   , Measure.includes   = [q | Incl   q <- xs]
   , Measure.aliases    = [a | Alias  a <- xs]
   , Measure.paliases   = [p | PAlias p <- xs]
+  , Measure.ealiases   = [p | EAlias p <- xs]
   , Measure.embeds     = M.fromList [e | Embed e <- xs]
   , Measure.qualifiers = [q | Qualif q <- xs]
   , Measure.decr       = [d | Decr d   <- xs]
@@ -485,6 +487,7 @@ specP
     <|> (reserved "using"     >> liftM IAlias invaliasP )
     <|> (reserved "type"      >> liftM Alias  aliasP    )
     <|> (reserved "predicate" >> liftM PAlias paliasP   )
+    <|> (reserved "expression">> liftM EAlias ealiasP   )
     <|> (reserved "embed"     >> liftM Embed  embedP    )
     <|> (reserved "qualif"    >> liftM Qualif qualifierP)
     <|> (reserved "Decrease"  >> liftM Decr   decreaseP )
@@ -547,6 +550,7 @@ embedP
 
 aliasP  = rtAliasP id           bareTypeP
 paliasP = rtAliasP stringSymbol predP
+ealiasP = rtAliasP stringSymbol exprP
 
 rtAliasP f bodyP
   = do pos  <- getPosition

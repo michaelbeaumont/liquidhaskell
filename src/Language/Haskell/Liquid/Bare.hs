@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE ImpredicativeTypes            #-}
 {-# LANGUAGE MultiParamTypeClasses, NoMonomorphismRestriction, TypeSynonymInstances, FlexibleInstances, TupleSections, ScopedTypeVariables, RecordWildCards, ParallelListComp  #-}
 
 -- | This module contains the functions that convert /from/ descriptions of 
@@ -12,6 +14,7 @@ module Language.Haskell.Liquid.Bare (
   -- , varSpecType
   ) where
 
+import Text.Parsec.Pos              (SourcePos) 
 import GHC hiding               (lookupName, Located)
 import Text.PrettyPrint.HughesPJ    hiding (first)
 import Var
@@ -121,6 +124,7 @@ makeGhcSpec' cfg vars defVars exports specs
   = do name <- gets modName
        makeRTEnv (concat [map (mod,) $ Ms.aliases  sp | (mod,sp) <- specs])
                  (concat [map (mod,) $ Ms.paliases sp | (mod,sp) <- specs])
+                 (concat [map (mod,) $ Ms.ealiases sp | (mod,sp) <- specs])
        (tcs, dcs)      <- mconcat <$> mapM makeConTypes specs
        let (tcs', dcs') = wiredTyDataCons
        let tycons       = tcs ++ tcs'
@@ -214,18 +218,29 @@ makeMeasureSelector x s dc n i = M {name = x, sort = s, eqns = [eqn]}
         mkx j = stringSymbol ("xx" ++ show j)
         
 --- Refinement Type Aliases
-makeRTEnv rts pts  = do initRTEnv
-                        makeRPAliases dummyPos pts
-                        makeRTAliases rts
+
+data Alias = Alias { aname :: Symbol
+                   , abody :: forall a. a}
+
+type RTPredAlias  = Either (ModName, RTAlias Symbol Pred)
+                           (RTAlias Symbol Pred)
+
+
+
+makeRTEnv rts pts ets  = do -- initRTEnv
+                            makeRPAliases dummyPos pts
+                            makeRTAliases rts
   where initRTEnv   = do forM_ rts $ \(mod,rta) -> setRTAlias (rtName rta) $ Left (mod,rta)
                          forM_ pts $ \(mod,pta) -> setRPAlias (rtName pta) $ Left (mod,pta)
 
-
 makeRTAliases xts = mapM_ expBody xts
   where expBody (mod,xt) = inModule mod $ do
-                             body <- withVArgs (rtVArgs xt) $ expandRTAlias dummyPos $ rtBody xt
+                             body <- withVArgs (rtVArgs xt) $ ofBareType $ rtBody xt
                              setRTAlias (rtName xt)
-                               $ Right $ mapRTAVars stringRTyVar $ xt { rtBody = body }
+                               $  mapRTAVars stringRTyVar $ xt { rtBody = body }
+
+setRPAlias x v = modify $ \b -> b{rtEnv = (rtEnv b){typeAliases = M.insert x v $ typeAliases (rtEnv b)}}
+setRTAlias x v = modify $ \b -> b{rtEnv = (rtEnv b){predAliases = M.insert x v $ predAliases (rtEnv b)}}
 
 makeRPAliases l xts = mapM_ expBody xts
   where expBody (mod,xt) = inModule mod $ do
@@ -292,42 +307,78 @@ expandAlias l = go
     go _ (RExprArg e)     = return $ RExprArg e
     go _ (RHole r)        = RHole <$> resolve r
 
+ofBareType :: (PPrint r, Reftable r, Resolvable r) => BRType r -> BareM (RRType r)
+ofBareType = go []
+  where
+    go s t@(RApp (Loc _ c) _ _ _)
+      | c `elem` s = Ex.throw $ errOther $ text 
+                              $ "Cyclic Reftype Alias Definition: " ++ show (c:s)
+      | otherwise  = lookupExpandRTApp dummyPos  s t
+    go s (RVar a r)       = RVar (stringRTyVar a) <$> resolve r
+    go s (RFun x t t' r)  = rFun x <$> go s t <*> go s t'
+    go s (RAppTy t t' r)  = RAppTy <$> go s t <*> go s t' <*> resolve r
+    go s (RAllE x t1 t2)  = liftM2 (RAllE x) (go s t1) (go s t2)
+    go s (REx x t1 t2)    = liftM2 (REx x) (go s t1) (go s t2)
+    go s (RAllT a t)      = RAllT (stringRTyVar a) <$> go s t
+    go s (RAllP a t)      = RAllP <$> ofBPVar a <*> go s t
+    go s (RAllS l t)      = RAllS l <$> go s t
+    go s (RCls c ts)      = RCls <$> lookupGhcClass c <*> mapM (go s) ts
+    go _ (ROth s)         = return $ ROth s
+    go _ (RExprArg e)     = return $ RExprArg e
+    go _ (RHole r)        = RHole <$> resolve r
 
+lookupExpandRTApp :: (PPrint r, Reftable r, Resolvable r, Show p) => p -> [String] ->  BRType r -> BareM (RRType r)
 lookupExpandRTApp l s (RApp lc@(Loc _ c) ts rs r) = do
   env <- gets (typeAliases.rtEnv)
   case M.lookup c env of
-    Just (Left (mod,rtb)) -> do
-      st <- inModule mod $ withVArgs (rtVArgs rtb) $ expandAlias l (c:s) $ rtBody rtb
-      let rts = mapRTAVars stringRTyVar $ rtb { rtBody = st }
-      setRTAlias c $ Right rts
-      r' <- resolve r
-      expandRTApp l s rts ts r'
-    Just (Right rts) -> do
-      r' <- resolve r
-      withVArgs (rtVArgs rts) $ expandRTApp l s rts ts r'
-    Nothing
-      | isList c && length ts == 1 -> do
-        tyi <- tcEnv <$> get
-        r'  <- resolve r
-        liftM2 (bareTCApp tyi r' listTyCon) (mapM (go s) rs) (mapM (expandAlias l s) ts)
-      | isTuple c -> do
-        tyi <- tcEnv <$> get
-        r'  <- resolve r
-        let tc = tupleTyCon BoxedTuple (length ts)
-        liftM2 (bareTCApp tyi r' tc) (mapM (go s) rs) (mapM (expandAlias l s) ts)
-      | otherwise -> do
-        tyi <- tcEnv <$> get
-        r'  <- resolve r
-        liftM3 (bareTCApp tyi r') (lookupGhcTyCon lc) (mapM (go s) rs) (mapM (expandAlias l s) ts)
-  where
-    go s (RMono ss r)    = RMono <$> mapM ofSyms ss <*> resolve r
-    go s (RPoly ss t)    = RPoly <$> mapM ofSyms ss <*> expandAlias l s t
+--     Just rtb -> do
+--       st <- return $ rtBody rtb
+--       let rts = rtb { rtBody = st }
+  --     setRTAlias c rts
+--       r' <- resolve r
+--       expandRTApp l s rts ts r'
+     Just rts -> do
+       r' <- resolve r
+       withVArgs (rtVArgs rts) $ expandRTApp l s rts ts r'
+     Nothing
+       | isList c && length ts == 1 -> do
+         tyi <- tcEnv <$> get
+         r'  <- resolve r
+         liftM2 (bareTCApp tyi r' listTyCon) (mapM (go s) rs) (mapM ofBareType ts)
+       | isTuple c -> do
+         tyi <- tcEnv <$> get
+         r'  <- resolve r
+         let tc = tupleTyCon BoxedTuple (length ts)
+         liftM2 (bareTCApp tyi r' tc) (mapM (go s) rs) (mapM ofBareType ts)
+       | otherwise -> do
+         tyi <- tcEnv <$> get
+         r'  <- resolve r
+         liftM3 (bareTCApp tyi r') (lookupGhcTyCon lc) (mapM (go s) rs) (mapM ofBareType ts)
+   where
+     go s (RMono ss r)    = RMono <$> mapM ofSyms ss <*> resolve r
+     go s (RPoly ss t)    = RPoly <$> mapM ofSyms ss <*> ofBareType t
 
 
-expandRTApp :: Show p => p -> [String] -> RTAlias RTyVar SpecType  -> [BareType] -> RReft -> BareM SpecType
+
+type RTAliasRef = forall r. (Reftable r, Resolvable r) => M.HashMap String (RTAlias RTyVar (RRType r))
+data RTEnv   = RTE { typeAliases :: RTAliasRef
+                   , predAliases :: M.HashMap String RTPredAlias
+                   }
+
+instance Monoid RTEnv where
+  (RTE ta1 pa1) `mappend` (RTE ta2 pa2) = RTE (ta1 `M.union` ta2) (pa1 `M.union` pa2)
+  mempty = RTE M.empty M.empty
+
+-- mapRT :: (RTAlias RTyVar (RRType r) -> b) 
+--       -> RTEnv -> RTEnv
+-- mapRT f e = e { typeAliases = f $ typeAliases e }
+-- mapRP f e = e { predAliases = f $ predAliases e }
+
+expandRTApp :: (PPrint r, Reftable r, Resolvable r, Show p) => p -> [String] -> RTAlias RTyVar (RRType r) -> [BRType r] -> r -> BareM (RRType r)
+-- expandRTApp :: Show p => p -> [String] -> RTAlias RTyVar SpecType  -> [BareType] -> RReft -> BareM SpecType
 expandRTApp l s rta args r
   | length args == (length αs) + (length εs)
-  = do args'  <- mapM (expandAlias l s) args
+  = do args'  <- mapM ofBareType args
        let ts  = take (length αs) args'
            αts = zipWith (\α t -> (α, toRSort t, t)) αs ts
        return $ subst su . (`strengthen` r) . subsTyVars_meet αts $ rtBody rta
@@ -400,7 +451,6 @@ expandRPApp l s rp es
 makeQualifiers (mod,spec) = inModule mod mkQuals
   where
     mkQuals = mapM resolve $ Ms.qualifiers spec
-
 
 makeClasses cfg vs (mod,spec) = inModule mod $ mapM mkClass $ Ms.classes spec
   where
@@ -626,12 +676,6 @@ addSym x = modify $ \be -> be { varEnv = (varEnv be) `L.union` [x] }
 mkExprAlias v
   = setRTAlias v (Right (RTA v [] [] (RExprArg (EVar $ symbol v)) dummyPos))
 
-setRTAlias s a =
-  modify $ \b -> b { rtEnv = mapRT (M.insert s a) $ rtEnv b }
-
-setRPAlias s a =
-  modify $ \b -> b { rtEnv = mapRP (M.insert s a) $ rtEnv b }
-
 execBare :: BareM a -> BareEnv -> IO (Either Error a)
 execBare act benv = 
    do z <- evalStateT (runErrorT (runWriterT act)) benv
@@ -649,9 +693,12 @@ makeMeasureSpec :: (ModName, Ms.Spec BareType LocSymbol) -> BareM (Ms.MSpec Spec
 makeMeasureSpec (mod,spec) = inModule mod mkSpec
   where
     mkSpec = mkMeasureDCon =<< mkMeasureSort =<< m
-    m      = Ms.mkMSpec <$> (mapM expandRTAliasMeasure $ Ms.measures spec)
+    m      = Ms.mkMSpec <$> (tx $ Ms.measures spec)
                         <*> return (Ms.cmeasures spec)
-                        <*> (mapM expandRTAliasMeasure $ Ms.imeasures spec)
+                        <*> (tx $ Ms.imeasures spec)
+    tx ms = mapM resolve $ (generalizeSort <$> ms)
+
+    generalizeSort m = m {sort = generalize (sort m)}
 
 makeMeasureSpec' = mapFst (mapSnd uRType <$>) . Ms.dataConTypes . first (mapReft ur_reft)
 
@@ -751,9 +798,9 @@ warn x = tell [x]
 
 
 mkVarSpec :: (Var, LocSymbol, BareType) -> BareM (Var, Located SpecType)
-mkVarSpec (v, Loc l _, b) = tx <$> mkSpecType l b
+mkVarSpec (v, Loc l _, b) = tx <$> makeSpecType (Loc l b)
   where
-    tx = (v,) . Loc l . generalize
+    tx = (v,) . (generalize <$>)
 
 plugHoles :: (RReft -> RReft) -> Type -> SpecType -> SpecType
 plugHoles f t st = mkArrow αs ps (ls1 ++ ls2) cs' $ go rt' st''
@@ -810,6 +857,12 @@ makeInvariants' :: [Located BareType] -> BareM [Located SpecType]
 makeInvariants' ts = mapM mkI ts
   where 
     mkI (Loc l t)      = (Loc l) . generalize <$> mkSpecType l t
+
+makeSpecType :: Located BareType -> BareM (Located SpecType)
+makeSpecType lt = ofBareTypeL lt' >>= resolve
+  where lt' = (txParams subvUReft (uPVar <$> πs)) <$> lt
+        πs  = ty_preds $ toRTypeRep  $ val lt
+
 
 mkSpecType l t = mkSpecType' l (ty_preds $ toRTypeRep t)  t
 
@@ -962,6 +1015,16 @@ fixpointPrims = [ "Pred"
 class Resolvable a where
   resolve :: a -> BareM a
 
+
+instance Resolvable (Measure (RType LocString LocString String RReft ) LocSymbol) where
+  resolve = expandRTAliasMeasure 
+
+instance Resolvable (Located SpecType) where
+  resolve (Loc l t) = Loc l <$> resolve t
+
+instance Resolvable SpecType where
+  resolve t = mapReftM resolve t
+
 instance Resolvable Qualifier where
   resolve (Q n ps b) = Q n <$> mapM (secondM resolve) ps <*> resolve b
 
@@ -989,14 +1052,14 @@ instance Resolvable Expr where
 instance Resolvable LocSymbol where
   resolve ls@(Loc l (S s))
       | s `elem` fixpointPrims = return ls
-      | otherwise = do env <- gets (typeAliases.rtEnv)
-                       case M.lookup s env of
-                         Nothing | isCon s
-                           -> do v <- lookupGhcVar $ Loc l s
-                                 let qs = symbol $ showPpr v
-                                 addSym (qs,v)
-                                 return $ Loc l qs
-                         _ -> return ls
+      | otherwise =return ls --  do env <- gets (typeAliases.rtEnv)
+                   --     case M.lookup s env of
+--                          Nothing | isCon s
+--                            -> do v <- lookupGhcVar $ Loc l s
+--                                  let qs = symbol $ showPpr v
+--                                  addSym (qs,v)
+--                                  return $ Loc l qs
+                     --     _ -> return ls
 
 --FIXME: probably need to add a Location to `EVar` so we don't need
 --this instance..
@@ -1122,45 +1185,46 @@ mkps_ _     _       _          _    _ = error "Bare : mkps_"
 -- 
 -- makeRTyConPs _ _ _ t = t
 
+ofBareTypeL (Loc l t) = liftM (Loc l) (ofBareType t)
 
-ofBareType :: (PPrint r, Reftable r) => BRType r -> BareM (RRType r)
-ofBareType (RVar a r) 
-  = return $ RVar (stringRTyVar a) r
-ofBareType (RFun x t1 t2 _) 
-  = liftM2 (rFun x) (ofBareType t1) (ofBareType t2)
-ofBareType t@(RAppTy t1 t2 r) 
-  = liftM3 RAppTy (ofBareType t1) (ofBareType t2) (return r)
-ofBareType (RAllE x t1 t2)
-  = liftM2 (RAllE x) (ofBareType t1) (ofBareType t2)
-ofBareType (REx x t1 t2)
-  = liftM2 (REx x) (ofBareType t1) (ofBareType t2)
-ofBareType (RAllT a t) 
-  = liftM  (RAllT (stringRTyVar a)) (ofBareType t)
-ofBareType (RAllP π t) 
-  = liftM2 RAllP (ofBPVar π) (ofBareType t)
-ofBareType (RAllS s t) 
-  = liftM  (RAllS s) (ofBareType t)
-ofBareType (RApp tc ts@[_] rs r) 
-  | isList tc
-  = do tyi <- tcEnv <$> get
-       liftM2 (bareTCApp tyi r listTyCon) (mapM ofRef rs) (mapM ofBareType ts)
-ofBareType (RApp tc ts rs r) 
-  | isTuple tc
-  = do tyi <- tcEnv <$> get
-       liftM2 (bareTCApp tyi r c) (mapM ofRef rs) (mapM ofBareType ts)
-    where c = tupleTyCon BoxedTuple (length ts)
-ofBareType (RApp tc ts rs r) 
-  = do tyi <- tcEnv <$> get
-       liftM3 (bareTCApp tyi r) (lookupGhcTyCon tc) (mapM ofRef rs) (mapM ofBareType ts)
-ofBareType (RCls c ts)
-  = liftM2 RCls (lookupGhcClass c) (mapM ofBareType ts)
-ofBareType (ROth s)
-  = return $ ROth s
-ofBareType (RHole r)
-  = return $ RHole r
-ofBareType t
-  = errorstar $ "Bare : ofBareType cannot handle " ++ show t
-
+-- ofBareType :: (PPrint r, Reftable r) => BRType r -> BareM (RRType r)
+-- ofBareType (RVar a r) 
+--   = return $ RVar (stringRTyVar a) r
+-- ofBareType (RFun x t1 t2 _) 
+--   = liftM2 (rFun x) (ofBareType t1) (ofBareType t2)
+-- ofBareType t@(RAppTy t1 t2 r) 
+--   = liftM3 RAppTy (ofBareType t1) (ofBareType t2) (return r)
+-- ofBareType (RAllE x t1 t2)
+--   = liftM2 (RAllE x) (ofBareType t1) (ofBareType t2)
+-- ofBareType (REx x t1 t2)
+--   = liftM2 (REx x) (ofBareType t1) (ofBareType t2)
+-- ofBareType (RAllT a t) 
+--   = liftM  (RAllT (stringRTyVar a)) (ofBareType t)
+-- ofBareType (RAllP π t) 
+--   = liftM2 RAllP (ofBPVar π) (ofBareType t)
+-- ofBareType (RAllS s t) 
+--   = liftM  (RAllS s) (ofBareType t)
+-- ofBareType (RApp tc ts@[_] rs r) 
+--   | isList tc
+--   = do tyi <- tcEnv <$> get
+--        liftM2 (bareTCApp tyi r listTyCon) (mapM ofRef rs) (mapM ofBareType ts)
+-- ofBareType (RApp tc ts rs r) 
+--   | isTuple tc
+--   = do tyi <- tcEnv <$> get
+--        liftM2 (bareTCApp tyi r c) (mapM ofRef rs) (mapM ofBareType ts)
+--     where c = tupleTyCon BoxedTuple (length ts)
+-- ofBareType (RApp tc ts rs r) 
+--   = do tyi <- tcEnv <$> get
+--        liftM3 (bareTCApp tyi r) (lookupGhcTyCon tc) (mapM ofRef rs) (mapM ofBareType ts)
+-- ofBareType (RCls c ts)
+--   = liftM2 RCls (lookupGhcClass c) (mapM ofBareType ts)
+-- ofBareType (ROth s)
+--   = return $ ROth s
+-- ofBareType (RHole r)
+--   = return $ RHole r
+-- ofBareType t
+--   = errorstar $ "Bare : ofBareType cannot handle " ++ show t
+-- 
 ofRef (RPoly ss t)   
   = liftM2 RPoly (mapM ofSyms ss) (ofBareType t)
 ofRef (RMono ss r) 
@@ -1209,10 +1273,10 @@ measureCtors = sortNub . fmap (fmap symbolString . ctor) . concat . M.elems . Ms
 
 -- mkMeasureSort :: (PVarable pv, Reftable r) => Ms.MSpec (BRType pv r) bndr-> BareM (Ms.MSpec (RRType pv r) bndr)
 mkMeasureSort (Ms.MSpec c mm cm im)
-  = Ms.MSpec c <$> forM mm tx <*> forM cm tx <*> forM im tx
-    where
-      tx m = liftM (\s' -> m {sort = s'}) (ofBareType (sort m))
-
+   = Ms.MSpec c <$> forM mm tx <*> forM cm tx <*> forM im tx
+     where
+       tx m = liftM (\s' -> m {sort = s'}) (ofBareType (sort m))
+-- 
 
 
 -----------------------------------------------------------------------

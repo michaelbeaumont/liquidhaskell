@@ -49,6 +49,7 @@ data Spec ty bndr  = Spec {
   , includes   :: ![FilePath]                   -- ^ Included qualifier files
   , aliases    :: ![RTAlias String BareType]    -- ^ RefType aliases
   , paliases   :: ![RTAlias Symbol Pred]        -- ^ Refinement/Predicate aliases
+  , ealiases   :: ![RTAlias Symbol Expr]        -- ^ Refinement/Expression aliases
   , embeds     :: !(TCEmb (Located String))     -- ^ GHC-Tycon-to-fixpoint Tycon map
   , qualifiers :: ![Qualifier]                  -- ^ Qualifiers in source/spec files
   , decr       :: ![(LocSymbol, [Int])]         -- ^ Information on decreasing arguments
@@ -148,6 +149,7 @@ instance Monoid (Spec ty bndr) where
            , includes   = sortNub $ includes s1   ++ includes s2
            , aliases    =           aliases s1    ++ aliases s2
            , paliases   =           paliases s1   ++ paliases s2
+           , ealiases   =           ealiases s1   ++ ealiases s2
            , embeds     = M.union   (embeds s1)     (embeds s2)
            , qualifiers =           qualifiers s1 ++ qualifiers s2
            , decr       =           decr s1       ++ decr s2
@@ -172,6 +174,7 @@ instance Monoid (Spec ty bndr) where
            , includes   = [] 
            , aliases    = [] 
            , paliases   = [] 
+           , ealiases   = [] 
            , embeds     = M.empty
            , qualifiers = []
            , decr       = []
