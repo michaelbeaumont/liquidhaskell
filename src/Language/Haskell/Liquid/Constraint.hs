@@ -183,7 +183,7 @@ predEnv sp         = F.fromListSEnv bs
     dcPtoPredTy    :: DC.DataCon -> DataConP -> PrType
     dcPtoPredTy dc = fmap ur_pred . dataConPSpecType dc
 
-unifyts penv (x, t)     = (x, unify pt t)
+unifyts penv (x, t)     = (x, t) -- (x, unify pt t)
  where
    pt                   = F.lookupSEnv x' penv
    x'                   = F.symbol x
